@@ -12,7 +12,7 @@ import scala.concurrent.duration._
  */
 object Starter extends App {
 
-  implicit  val timeout = Timeout (500 milliseconds)
+  implicit  val timeout = Timeout (900 milliseconds)
 
   val system = ActorSystem("akkaPerf")
 
