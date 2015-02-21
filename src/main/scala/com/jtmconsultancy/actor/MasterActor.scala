@@ -12,7 +12,7 @@ import scala.util.Random
 case object Start
 
 case class Transaction(iban:Int)
- class ServiceTimeoutException(msg:String) extends Exception(msg)
+ class ServiceException(msg:String) extends Exception(msg)
 
 class MasterActor() extends Actor {
   var caller:ActorRef = _
@@ -29,19 +29,37 @@ class MasterActor() extends Actor {
 
 
 class TransactionAggregatorActor(iban:Int ) extends Actor {
+  
+
 
   val worker = context.actorOf(Props(new WorkerActor), "workeractor")
 
   var caller:ActorRef = _
 
+  context.setReceiveTimeout(130 milliseconds)
+
 
   override def receive: Receive = {
+
     case Start =>
       caller = sender()
 
       worker ! Transaction(iban)
-    case s:String   => caller ! s
+    case s:String   =>
 
+      caller ! s
+    case ReceiveTimeout =>  worker ! Transaction(iban)
+
+
+  }
+
+
+  final val defaultStrategy: SupervisorStrategy = {
+    def defaultDecider: Decider = {
+      case _: ServiceException ⇒ Restart
+      case _: Exception        ⇒ Stop
+    }
+    OneForOneStrategy()(defaultDecider)
   }
 
 }
@@ -50,68 +68,28 @@ class TransactionAggregatorActor(iban:Int ) extends Actor {
 
 class WorkerActor() extends Actor {
 
-  import akka.pattern.{ask,pipe}
   import context.dispatcher
 
-  implicit val timeout = Timeout(140 milliseconds)
-
-
   val random = new Random()
-
-   var caller:ActorRef = _
-
-  override def receive = {
-    case msg:Transaction =>
-      caller = sender()
-
-      val result = (context.actorOf(Props(new ServiceActor),"serviceactor") ? msg).mapTo[String]
-      result pipeTo sender
-    case s:String =>
-      caller ! s
-  }
-
-
-
-
-  final val defaultStrategy: SupervisorStrategy = {
-    def defaultDecider: Decider = {
-      case _: ServiceTimeoutException ⇒ Restart
-      case _: Exception                ⇒ Stop
-    }
-    OneForOneStrategy()(defaultDecider)
-  }
-}
-
-
-
-
-class ServiceActor() extends Actor {
-
-  val random = new Random()
-
-  val start = System.currentTimeMillis()
 
   override def receive = {
     case msg:Transaction =>
 
       val waited = random.nextInt(100)+100
+      
+      if (waited %2 ==0) throw new ServiceException("Oops random crash!!")
 
-      if (waited > 140) {
-        throw new ServiceTimeoutException("Service timed out!!")
-      }
-
-    sender ! s"did some work for  ${msg.iban} "
+      context.system.scheduler.scheduleOnce(waited milliseconds,sender, s"did some work for  ${msg.iban}" )
+      println(s"waited ${waited} before sending back msg")
 
   }
 
-  override def preRestart(
-    reason: Throwable, message: Option[Any]) {
-    // retry
-    println("retrying message")
+  override def preRestart(reason: Throwable, message: Option[Any]) {
+    println("trying again after crash")
     message foreach { self forward _ }
   }
+
+
 }
-
-
 
 
